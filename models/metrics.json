@@ -1,0 +1,18 @@
+{
+    "validation_accuracy": 0.7534883720930232,
+    "epochs_trained": 6,
+    "final_train_accuracy": 1.0,
+    "final_val_accuracy": 0.7534883618354797,
+    "final_train_loss": 0.0032386253587901592,
+    "final_val_loss": 0.6613548398017883,
+    "class_counts": {
+        "Potato___Early_blight": 1000,
+        "Potato___Late_blight": 1000,
+        "Potato___healthy": 152
+    },
+    "classes": [
+        "Potato___Early_blight",
+        "Potato___Late_blight",
+        "Potato___healthy"
+    ]
+}

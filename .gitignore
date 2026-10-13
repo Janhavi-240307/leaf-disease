@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Dataset - Keep raw training dataset local
+data/raw/
+data/processed/
+data/*.zip
+*.log
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+
+# Note: models/ (including potato_disease_model.keras: 25.35 MB)
+# and data/samples/ are explicitly tracked for Streamlit Cloud deployment
