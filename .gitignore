@@ -20,5 +20,13 @@ data/*.zip
 .idea/
 .DS_Store
 
+# Secrets & Environment Files
+.env
+.env.*
+*.env
+*.key
+*.pem
+secrets.toml
+
 # Note: models/ (including potato_disease_model.keras: 25.35 MB)
 # and data/samples/ are explicitly tracked for Streamlit Cloud deployment
