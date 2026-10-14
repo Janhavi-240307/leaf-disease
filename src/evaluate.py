@@ -24,6 +24,7 @@ from src.config import (
     CONFUSION_MATRIX_PATH,
     IMG_HEIGHT,
     IMG_WIDTH,
+    METRICS_PATH,
     MODEL_PATH,
     MODELS_DIR,
     RAW_DATA_DIR,
@@ -45,6 +46,9 @@ def evaluate_model(dataset_path: Path = RAW_DATA_DIR, model_path: Path = MODEL_P
     model = tf.keras.models.load_model(str(model_path))
 
     print(f"[INFO] Loading evaluation data from: {dataset_path}")
+    # IMPORTANT: Use shuffle=True with fixed RANDOM_SEED matching train.py
+    # When shuffle=False is combined with validation_split, TensorFlow takes the last 20%
+    # in alphabetical order, completely dropping the first class (Early Blight).
     val_ds = tf.keras.utils.image_dataset_from_directory(
         dataset_path,
         validation_split=VALIDATION_SPLIT,
@@ -52,7 +56,7 @@ def evaluate_model(dataset_path: Path = RAW_DATA_DIR, model_path: Path = MODEL_P
         seed=RANDOM_SEED,
         image_size=(IMG_HEIGHT, IMG_WIDTH),
         batch_size=32,
-        shuffle=False,
+        shuffle=True,
     )
 
     class_names = val_ds.class_names
@@ -68,8 +72,10 @@ def evaluate_model(dataset_path: Path = RAW_DATA_DIR, model_path: Path = MODEL_P
     y_true = np.array(y_true)
     y_pred = np.array(y_pred)
 
-    # 1. Classification Report
     label_indices = list(range(len(class_names)))
+    val_acc = float(np.mean(y_true == y_pred))
+
+    # 1. Classification Report
     report = classification_report(
         y_true, y_pred, labels=label_indices, target_names=class_names, digits=4
     )
@@ -101,6 +107,30 @@ def evaluate_model(dataset_path: Path = RAW_DATA_DIR, model_path: Path = MODEL_P
     plt.savefig(CONFUSION_MATRIX_PATH, dpi=300)
     plt.close()
     print(f"[INFO] Confusion matrix plot saved to: {CONFUSION_MATRIX_PATH}")
+
+    # 3. Synchronize metrics.json with verified validation metrics
+    import json
+    metrics = {}
+    if METRICS_PATH.exists():
+        try:
+            with open(METRICS_PATH, "r") as f:
+                metrics = json.load(f)
+        except Exception:
+            metrics = {}
+
+    metrics.update({
+        "validation_accuracy": val_acc,
+        "evaluation_accuracy": val_acc,
+        "val_samples": int(len(y_true)),
+        "confusion_matrix": cm.tolist(),
+        "class_support": {class_names[i]: int((y_true == i).sum()) for i in range(len(class_names))},
+        "classes": class_names,
+    })
+
+    with open(METRICS_PATH, "w") as f:
+        json.dump(metrics, f, indent=4)
+    print(f"[INFO] Metrics metadata updated at: {METRICS_PATH}")
+    return val_acc, report, cm
 
 
 def main():

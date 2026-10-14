@@ -8,12 +8,23 @@ from src.config import IMG_HEIGHT, IMG_WIDTH
 
 
 def load_image_from_bytes(image_bytes: bytes) -> np.ndarray:
-    """Decodes raw image bytes into a BGR OpenCV NumPy array."""
+    """Decodes raw image bytes into a BGR OpenCV NumPy array, handling EXIF orientation and formats."""
+    if not image_bytes:
+        raise ValueError("Received empty image byte stream.")
     file_bytes = np.asarray(bytearray(image_bytes), dtype=np.uint8)
     image_bgr = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-    if image_bgr is None:
-        raise ValueError("Failed to decode image from provided bytes.")
-    return image_bgr
+    if image_bgr is not None:
+        return image_bgr
+
+    # Fallback to PIL for tricky formats or HEIC/transparency
+    import io
+    from PIL import Image, ImageOps
+    pil_img = Image.open(io.BytesIO(image_bytes))
+    pil_img = ImageOps.exif_transpose(pil_img)
+    if pil_img.mode != "RGB":
+        pil_img = pil_img.convert("RGB")
+    image_rgb = np.array(pil_img, dtype=np.uint8)
+    return cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
 
 
 def load_image_from_path(image_path: str) -> np.ndarray:
@@ -103,19 +114,21 @@ def detect_leaf_contours(
 def get_opencv_pipeline_views(image_bgr: np.ndarray) -> Dict[str, np.ndarray]:
     """
     Executes the full OpenCV preprocessing pipeline and returns RGB arrays
-    ready for Streamlit display.
+    ready for Streamlit display. All arrays are guaranteed uint8 3-channel RGB.
     """
     segmented_bgr, mask = segment_leaf(image_bgr)
     enhanced_bgr = enhance_lesions(image_bgr)
     annotated_bgr, bbox = detect_leaf_contours(image_bgr, mask)
 
-    # Convert all views to RGB for Streamlit/Matplotlib
+    # Convert mask to 3-channel RGB so all viewers render it reliably
+    mask_rgb = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
+
     return {
-        "original_rgb": cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB),
-        "mask": mask,
-        "segmented_rgb": cv2.cvtColor(segmented_bgr, cv2.COLOR_BGR2RGB),
-        "enhanced_rgb": cv2.cvtColor(enhanced_bgr, cv2.COLOR_BGR2RGB),
-        "contour_rgb": cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB),
+        "original_rgb": np.ascontiguousarray(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB), dtype=np.uint8),
+        "mask": np.ascontiguousarray(mask_rgb, dtype=np.uint8),
+        "segmented_rgb": np.ascontiguousarray(cv2.cvtColor(segmented_bgr, cv2.COLOR_BGR2RGB), dtype=np.uint8),
+        "enhanced_rgb": np.ascontiguousarray(cv2.cvtColor(enhanced_bgr, cv2.COLOR_BGR2RGB), dtype=np.uint8),
+        "contour_rgb": np.ascontiguousarray(cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB), dtype=np.uint8),
         "bbox": bbox,
     }
 
@@ -125,10 +138,10 @@ def preprocess_for_inference(
 ) -> np.ndarray:
     """
     Resizes and prepares image array for TensorFlow/Keras MobileNetV2 input.
-    Input range is normalized appropriately for model input [0, 1] or MobileNetV2 scaling.
+    Uses bilinear interpolation (cv2.INTER_LINEAR) matching tf.image.resize.
     """
     rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-    resized = cv2.resize(rgb, target_size, interpolation=cv2.INTER_AREA)
+    resized = cv2.resize(rgb, target_size, interpolation=cv2.INTER_LINEAR)
     expanded = np.expand_dims(resized, axis=0).astype(np.float32)
     return expanded
 

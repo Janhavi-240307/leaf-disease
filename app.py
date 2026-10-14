@@ -162,26 +162,29 @@ def main():
                 help="Upload a clear picture of a potato plant leaf against a neutral or natural background.",
             )
             if uploaded_file is not None:
-                image_data = uploaded_file.read()
+                image_data = uploaded_file.getvalue()
 
         elif input_choice == "📷 Live Webcam Capture":
             st.info("💡 **Camera Instructions:** Position a potato leaf in front of your camera. Ensure even lighting and steady focus.")
             camera_image = st.camera_input("Take a photo of the plant leaf")
             if camera_image is not None:
-                image_data = camera_image.read()
+                image_data = camera_image.getvalue()
 
         elif input_choice == "🧪 Select Dataset Sample":
-            # Search dataset folders for candidate samples
-            candidates = (
-                list(RAW_DATA_DIR.glob("**/*.jpg")) +
-                list(RAW_DATA_DIR.glob("**/*.png")) +
-                list(SAMPLES_DIR.glob("**/*.jpg"))
+            # Search samples directory (available both locally and on Streamlit Cloud)
+            candidates = sorted(
+                list(SAMPLES_DIR.glob("**/*.jpg")) +
+                list(SAMPLES_DIR.glob("**/*.JPG")) +
+                list(SAMPLES_DIR.glob("**/*.png"))
             )
+            if not candidates and RAW_DATA_DIR.exists():
+                candidates = list(RAW_DATA_DIR.glob("**/*.jpg"))[:20]
+
             if candidates:
                 sample_path = st.selectbox(
                     "Choose an authentic sample image:",
                     options=candidates,
-                    format_func=lambda p: f"{p.parent.name} - {p.name}",
+                    format_func=lambda p: f"{p.parent.name.replace('Potato___', '')} - {p.name}",
                 )
                 if sample_path:
                     with open(sample_path, "rb") as f:
@@ -224,21 +227,32 @@ def main():
                 ])
 
                 with cv_tabs[0]:
-                    st.image(views.get("original_rgb"), caption="Input Image", use_container_width=True)
+                    if image_data is not None and isinstance(image_data, (bytes, bytearray)):
+                        st.image(image_data, caption="Original Input Image", use_container_width=True)
+                    elif views.get("original_rgb") is not None:
+                        st.image(views["original_rgb"], caption="Original Input Image", use_container_width=True)
+
                 with cv_tabs[1]:
-                    st.image(views.get("segmented_rgb"), caption="Background-Suppressed Foliage (HSV Mask)", use_container_width=True)
+                    if views.get("segmented_rgb") is not None:
+                        st.image(views["segmented_rgb"], caption="Background-Suppressed Foliage (HSV Mask)", use_container_width=True)
+
                 with cv_tabs[2]:
-                    st.image(views.get("enhanced_rgb"), caption="CLAHE Contrast-Enhanced Lesion Spots", use_container_width=True)
+                    if views.get("enhanced_rgb") is not None:
+                        st.image(views["enhanced_rgb"], caption="CLAHE Contrast-Enhanced Lesion Spots", use_container_width=True)
+
                 with cv_tabs[3]:
-                    st.image(views.get("mask"), caption="Binary Foliage Mask", use_container_width=True)
+                    if views.get("mask") is not None:
+                        st.image(views["mask"], caption="Binary Foliage Mask", use_container_width=True)
+
                 with cv_tabs[4]:
-                    st.image(views.get("contour_rgb"), caption="Largest Contour & Bounding Box", use_container_width=True)
+                    if views.get("contour_rgb") is not None:
+                        st.image(views["contour_rgb"], caption="Largest Contour & Bounding Box", use_container_width=True)
 
             # Right Column: Disease Diagnosis
             with col2:
                 st.subheader("🧪 Deep Learning Diagnosis")
 
-                if not result["success"]:
+                if not result.get("success", False):
                     st.error(result.get("message", "Model prediction failed."))
                 else:
                     pred_class = result["predicted_class"]
@@ -254,8 +268,18 @@ def main():
                     else:
                         st.error(f"### Diagnosis: {disp_name}")
 
-                    # Confidence Metric
-                    st.metric("Model Confidence Score", f"{conf * 100:.2f}%")
+                    # Confidence Metric & Certainty Level
+                    col_m1, col_m2 = st.columns([1, 1])
+                    with col_m1:
+                        st.metric("Model Confidence Score", f"{conf * 100:.2f}%")
+                    with col_m2:
+                        if conf >= 0.75:
+                            st.caption("🟢 **High Diagnostic Certainty**")
+                        elif conf >= 0.50:
+                            st.caption("🟡 **Moderate Diagnostic Certainty**")
+                        else:
+                            st.caption("🟠 **Borderline / Mixed Features** (Split probability across classes)")
+
                     st.progress(min(float(conf), 1.0))
 
                     # Probability Breakdown
@@ -310,11 +334,30 @@ def main():
             m4.metric("Epochs Completed", metrics.get("epochs_trained", "N/A"))
 
             if "class_counts" in metrics:
-                st.markdown("##### Dataset Distribution Verified by OpenCV")
-                counts_df = pd.DataFrame([
-                    {"Condition": DISPLAY_NAMES.get(k, k), "Verified Images": v}
-                    for k, v in metrics["class_counts"].items()
-                ])
+                st.markdown("##### 📁 Verified Dataset Distribution & Split Partition")
+                support = metrics.get("class_support", {})
+                counts = metrics["class_counts"]
+                rows = []
+                for k, total_cnt in counts.items():
+                    val_cnt = support.get(k, int(round(total_cnt * 0.2)))
+                    train_cnt = total_cnt - val_cnt
+                    rows.append({
+                        "Condition": DISPLAY_NAMES.get(k, k),
+                        "Total Images": total_cnt,
+                        "Training Split (80%)": train_cnt,
+                        "Validation Split (20%)": val_cnt,
+                    })
+                # Add total summary row
+                total_all = sum(r["Total Images"] for r in rows)
+                train_all = sum(r["Training Split (80%)"] for r in rows)
+                val_all = sum(r["Validation Split (20%)"] for r in rows)
+                rows.append({
+                    "Condition": "TOTAL",
+                    "Total Images": total_all,
+                    "Training Split (80%)": train_all,
+                    "Validation Split (20%)": val_all,
+                })
+                counts_df = pd.DataFrame(rows)
                 st.dataframe(counts_df, hide_index=True, use_container_width=True)
 
         col_img1, col_img2 = st.columns(2)
@@ -322,21 +365,65 @@ def main():
         with col_img1:
             st.markdown("##### 📈 Training & Validation Loss/Accuracy Curves")
             if HISTORY_PLOT_PATH.exists():
-                st.image(str(HISTORY_PLOT_PATH), caption="Training Progress Across Epochs", use_container_width=True)
+                try:
+                    from PIL import Image
+                    hist_img = Image.open(HISTORY_PLOT_PATH)
+                    st.image(hist_img, caption="Training Progress Across Epochs (MobileNetV2)", use_container_width=True)
+                except Exception:
+                    st.image(str(HISTORY_PLOT_PATH), caption="Training Progress Across Epochs (MobileNetV2)", use_container_width=True)
             else:
                 st.info("Training history plot will be displayed here once training is completed.")
 
         with col_img2:
             st.markdown("##### 🎯 Validation Confusion Matrix")
-            if CONFUSION_MATRIX_PATH.exists():
-                st.image(str(CONFUSION_MATRIX_PATH), caption="Confusion Matrix on Validation Data", use_container_width=True)
+            cm_data = metrics.get("confusion_matrix") if metrics else None
+            classes_list = metrics.get("classes", CLASS_NAMES) if metrics else CLASS_NAMES
+            if cm_data is not None:
+                try:
+                    import matplotlib.pyplot as plt
+                    import seaborn as sns
+                    fig, ax = plt.subplots(figsize=(6, 5))
+                    cm_array = np.array(cm_data)
+                    labels = [name.replace("Potato___", "").replace("_", " ") for name in classes_list]
+                    sns.heatmap(
+                        cm_array,
+                        annot=True,
+                        fmt="d",
+                        cmap="Greens",
+                        xticklabels=labels,
+                        yticklabels=labels,
+                        cbar=True,
+                        ax=ax,
+                    )
+                    val_n = metrics.get("val_samples", 430)
+                    ax.set_title(f"Confusion Matrix (N={val_n} Validation Samples)", fontsize=12, pad=10)
+                    ax.set_xlabel("Predicted Label", fontsize=10)
+                    ax.set_ylabel("True Label", fontsize=10)
+                    fig.tight_layout()
+                    st.pyplot(fig, use_container_width=True)
+                    plt.close(fig)
+                except Exception:
+                    if CONFUSION_MATRIX_PATH.exists():
+                        try:
+                            from PIL import Image
+                            cm_img = Image.open(CONFUSION_MATRIX_PATH)
+                            st.image(cm_img, caption="Confusion Matrix on Validation Data", use_container_width=True)
+                        except Exception:
+                            st.image(str(CONFUSION_MATRIX_PATH), caption="Confusion Matrix on Validation Data", use_container_width=True)
+            elif CONFUSION_MATRIX_PATH.exists():
+                try:
+                    from PIL import Image
+                    cm_img = Image.open(CONFUSION_MATRIX_PATH)
+                    st.image(cm_img, caption="Confusion Matrix on Validation Data", use_container_width=True)
+                except Exception:
+                    st.image(str(CONFUSION_MATRIX_PATH), caption="Confusion Matrix on Validation Data", use_container_width=True)
             else:
                 st.info("Confusion matrix will be displayed here once evaluation is completed.")
 
         # Show Classification Report if saved
         report_file = MODELS_DIR / "classification_report.txt"
         if report_file.exists():
-            st.markdown("##### 📑 Detailed Classification Report")
+            st.markdown("##### 📑 Detailed Classification Report (All 3 Classes Evaluated)")
             with open(report_file, "r") as f:
                 st.code(f.read(), language="text")
 

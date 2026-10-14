@@ -14,5 +14,29 @@
         "Potato___Early_blight",
         "Potato___Late_blight",
         "Potato___healthy"
-    ]
+    ],
+    "evaluation_accuracy": 0.7534883720930232,
+    "val_samples": 430,
+    "confusion_matrix": [
+        [
+            109,
+            12,
+            61
+        ],
+        [
+            0,
+            175,
+            33
+        ],
+        [
+            0,
+            0,
+            40
+        ]
+    ],
+    "class_support": {
+        "Potato___Early_blight": 182,
+        "Potato___Late_blight": 208,
+        "Potato___healthy": 40
+    }
 }
